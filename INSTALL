@@ -1,0 +1,8 @@
+Requires pyglet and avbin
+
+pyglet
+ pip install pyglet
+
+avbin (debian/ubuntu)
+ apt-get install libavbin0
+
