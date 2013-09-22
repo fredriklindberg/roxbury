@@ -7,33 +7,94 @@
 # ----------------------------------------------------------------------------
 #
 
+import os
 import sys
 import time
 import signal
+from optparse import OptionParser
 
-# Requires avbin
-import pyglet
+# Gstreamer python bindings
+import pygst
+import gst
+import gobject
 
-player = pyglet.media.Player()
-player.eos_action = 'loop'
+class Roxbury(object):
+    def __init__(self, files):
+        self._files = files
+        self._pos = 0
+        self.playing = False
+        self._pl = gst.element_factory_make("playbin2", "player")
+        self.next()
+        self.bus = bus = self._pl.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message", self.on_message)
 
-# Play/pause with kill -USR1, for debugging.
-def sighandler(sig, frame):
-    player.pause() if player.playing else player.play()
+    def on_message(self, bus, message):
+        t = message.type
+        if t == gst.MESSAGE_EOS:
+            self._pl.set_state(gst.STATE_NULL)
+            self.next()
+            self.play()
+        elif t == gst.MESSAGE_ERROR:
+            self.stop()
+            err, debug = message.parse_error()
+            print "Error: %s" % err
+
+    def poll(self):
+        self.bus.poll(gst.MESSAGE_ANY, 0)
+
+    def next(self):
+        file = self._files[self._pos]
+        self._pl.set_property('uri',
+            'file://' + os.path.abspath(self._files[self._pos]))
+        self._pos = (self._pos + 1) % len(self._files)
+
+    def play(self):
+        self.playing = True
+        self._pl.set_state(gst.STATE_PLAYING)
+
+    def stop(self):
+        self.playing = False
+        self._pl.set_state(gst.STATE_NULL)
+
+    def pause(self):
+        self.playing = False
+        self._pl.set_state(gst.STATE_PAUSED)
+
+    def toggle(self):
+        self.play() if not self.playing else self.pause()
+
+class Signal(object):
+    def __init__(self, signo):
+        self._list = []
+        signal.signal(signo, self.handler)
+
+    def add(self, callback, argument=None):
+        self._list.append((callback, argument))
+
+    def handler(self, sig, frame):
+        for (cb, arg) in self._list:
+            cb(arg)
 
 def main(args):
-    if len(args) < 2:
-        print "Usage {0} <file.mp3>".format(args[0])
+    parser = OptionParser(usage="%prog file1.mp3 [file2.mp3]")
+    (opts, files) = parser.parse_args()
+
+    if len(files) < 1:
+        print "You need to specify at least one music file"
         return 1
 
-    signal.signal(signal.SIGUSR1, sighandler)
+    roxbury = Roxbury(files)
 
-    source = pyglet.media.load(args[1])
-    player.queue(source)
+    sigusr1 = Signal(signal.SIGUSR1)
+    sigusr1.add((lambda x: roxbury.toggle()))
+
+    roxbury.play()
 
     while True:
-        player.dispatch_events()
+        roxbury.poll()
         time.sleep(0.05)
+
     return 0
 
 if __name__ == '__main__':
