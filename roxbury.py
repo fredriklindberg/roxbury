@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import signal
+import select
 from optparse import OptionParser
 
 # Gstreamer python bindings
@@ -77,12 +78,19 @@ class Signal(object):
             cb(arg)
 
 def main(args):
-    parser = OptionParser(usage="%prog file1.mp3 [file2.mp3]")
+    parser = OptionParser(usage="%prog [options] file1.mp3 [file2.mp3]")
+    parser.add_option("-p", "--poll", dest="gpio", default=None,
+                  help="GPIO poll")
     (opts, files) = parser.parse_args()
 
     if len(files) < 1:
         print "You need to specify at least one music file"
         return 1
+
+    p = select.poll()
+    if opts.gpio:
+        file = open(opts.gpio, 'r')
+        p.register(file, select.POLLPRI | select.POLLERR)
 
     roxbury = Roxbury(files)
 
@@ -93,7 +101,12 @@ def main(args):
 
     while True:
         roxbury.poll()
-        time.sleep(0.05)
+        ready = p.poll(0.5)
+        if len(ready) > 0:
+            (fd, event) = ready[0]
+            value = os.read(fd, 1)
+            roxbury.play() if int(value) == 1 else roxbury.pause()
+            os.lseek(fd, 0, os.SEEK_SET)
 
     return 0
 
