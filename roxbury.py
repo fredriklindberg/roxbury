@@ -97,8 +97,6 @@ def main(args):
     sigusr1 = Signal(signal.SIGUSR1)
     sigusr1.add((lambda x: roxbury.toggle()))
 
-    roxbury.play()
-
     while True:
         roxbury.poll()
         ready = p.poll(0.5)
