@@ -12,6 +12,7 @@ import sys
 import time
 import signal
 import select
+import syslog
 from optparse import OptionParser
 
 # Gstreamer python bindings
@@ -22,7 +23,7 @@ import gobject
 class Roxbury(object):
     def __init__(self, files):
         self._files = files
-        self._pos = 0
+        self._pos = -1
         self.playing = False
         self._pl = gst.element_factory_make("playbin2", "player")
         self.next()
@@ -37,30 +38,34 @@ class Roxbury(object):
             self.next()
             self.play()
         elif t == gst.MESSAGE_ERROR:
-            self.stop()
             err, debug = message.parse_error()
-            print "Error: %s" % err
+            syslog.syslog(syslog.LOG_ERR, "{0}".format(err))
+            syslog.syslog(syslog.LOG_DEBUG, "{0}".format(debug))
+            self.stop()
 
     def poll(self):
         self.bus.poll(gst.MESSAGE_ANY, 0)
 
-    def next(self):
+    def next(self, rand=False):
+        self._pos = (self._pos + 1) % len(self._files)
         file = self._files[self._pos]
         self._pl.set_property('uri',
             'file://' + os.path.abspath(self._files[self._pos]))
-        self._pos = (self._pos + 1) % len(self._files)
 
     def play(self):
         self.playing = True
         self._pl.set_state(gst.STATE_PLAYING)
+        syslog.syslog("Playing {0}".format(self._files[self._pos]))
 
     def stop(self):
         self.playing = False
         self._pl.set_state(gst.STATE_NULL)
+        syslog.syslog("Playpack stopped")
 
     def pause(self):
         self.playing = False
         self._pl.set_state(gst.STATE_PAUSED)
+        syslog.syslog("Playback paused")
 
     def toggle(self):
         self.play() if not self.playing else self.pause()
