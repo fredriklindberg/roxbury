@@ -87,8 +87,9 @@ def main(args):
         print "You need to specify at least one music file"
         return 1
 
-    p = select.poll()
+    p = None
     if opts.gpio:
+        p = select.poll()
         file = open(opts.gpio, 'r')
         p.register(file, select.POLLPRI | select.POLLERR)
 
@@ -99,12 +100,18 @@ def main(args):
 
     while True:
         roxbury.poll()
-        ready = p.poll(0.5)
-        if len(ready) > 0:
-            (fd, event) = ready[0]
-            value = os.read(fd, 1)
-            roxbury.play() if int(value) == 1 else roxbury.pause()
-            os.lseek(fd, 0, os.SEEK_SET)
+        if p:
+            ready = p.poll(0.5)
+            try:
+                if len(ready) > 0:
+                    (fd, event) = ready[0]
+                    value = os.read(fd, 1)
+                    roxbury.play() if int(value) == 1 else roxbury.pause()
+                    os.lseek(fd, 0, os.SEEK_SET)
+            except:
+                ''
+        else:
+            time.sleep(0.5)
 
     return 0
 
