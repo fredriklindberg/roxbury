@@ -89,7 +89,7 @@ class Signal(object):
         for (cb, arg) in self._list:
             cb(arg)
 
-def main(args):
+def main(fd, args):
     parser = OptionParser(usage="%prog [options] file1.mp3 [file2.mp3]")
     parser.add_option("-p", "--poll", dest="gpio", default=None,
                   help="GPIO poll")
@@ -97,7 +97,7 @@ def main(args):
 
     if len(files) < 1:
         print "You need to specify at least one music file"
-        return 1
+        return 0
 
     random.seed()
 
@@ -112,7 +112,22 @@ def main(args):
     sigusr1 = Signal(signal.SIGUSR1)
     sigusr1.add((lambda x: roxbury.toggle()))
 
-    while True:
+    running = [True]
+    def stop(x):
+        syslog.syslog("Got SIGTERM/SIGINT, shuting down player")
+        running[0] = False
+
+    sigterm = Signal(signal.SIGTERM)
+    sigterm.add(stop)
+    sigint = Signal(signal.SIGINT)
+    sigint.add(stop)
+
+    syslog.syslog("Ready to dance")
+
+    while running[0]:
+        if fd:
+            print >>fd, "emilio"
+            fd.flush()
         roxbury.poll()
         if p:
             ready = p.poll(0.5)
@@ -129,5 +144,54 @@ def main(args):
 
     return 0
 
+def watchdog():
+    r,w = os.pipe()
+    r = os.fdopen(r, 'r', 0)
+    w = os.fdopen(w, 'w', 0)
+
+    pid = os.fork()
+    if pid < 0:
+        print "Fork failed"
+        sys.exit(-1)
+    elif pid == 0:
+        sys.exit(main(w, sys.argv))
+
+    running = [True]
+    restart = False
+    def stop(x):
+        syslog.syslog("Got SIGTERM/SIGINT, shuting down watchdog")
+        running[0] = False
+
+    sigterm = Signal(signal.SIGTERM)
+    sigterm.add(stop)
+    sigint = Signal(signal.SIGINT)
+    sigint.add(stop)
+    signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+
+    while running[0]:
+        try:
+            rr,rw,re = select.select([r], [], [], 2.5)
+            if len(rr) > 0:
+                r.readline()
+            elif len(rr) == 0:
+                (wpid, ret) = os.waitpid(pid, os.WNOHANG)
+                if wpid == 0 or (wpid != 0 and ret != 0):
+                    os.kill(pid, signal.SIGKILL)
+                    restart = True
+                    syslog.syslog("Not enough ass-grabbing, resetting")
+                running[0] = False
+                break
+        except:
+            ''
+
+    r.close()
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except:
+        ''
+    return restart
+
 if __name__ == '__main__':
-    sys.exit(main(sys.argv))
+    restart = True
+    while restart:
+        restart = watchdog()
