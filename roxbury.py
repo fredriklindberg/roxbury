@@ -13,6 +13,7 @@ import time
 import signal
 import select
 import syslog
+import random
 from optparse import OptionParser
 
 # Gstreamer python bindings
@@ -21,9 +22,10 @@ import gst
 import gobject
 
 class Roxbury(object):
-    def __init__(self, files):
+    def __init__(self, files, rand=False):
         self._files = files
         self._pos = -1
+        self._rand = rand
         self.playing = False
         self._pl = gst.element_factory_make("playbin2", "player")
         self.next()
@@ -46,11 +48,16 @@ class Roxbury(object):
     def poll(self):
         self.bus.poll(gst.MESSAGE_ANY, 0)
 
-    def next(self, rand=False):
+    def next(self):
         self._pos = (self._pos + 1) % len(self._files)
+        if self._rand and self._pos == (len(self._files) - 1):
+            self.shuffle()
         file = self._files[self._pos]
         self._pl.set_property('uri',
             'file://' + os.path.abspath(self._files[self._pos]))
+
+    def shuffle(self):
+        random.shuffle(self._files)
 
     def play(self):
         self.playing = True
@@ -92,13 +99,15 @@ def main(args):
         print "You need to specify at least one music file"
         return 1
 
+    random.seed()
+
     p = None
     if opts.gpio:
         p = select.poll()
         file = open(opts.gpio, 'r')
         p.register(file, select.POLLPRI | select.POLLERR)
 
-    roxbury = Roxbury(files)
+    roxbury = Roxbury(files, True)
 
     sigusr1 = Signal(signal.SIGUSR1)
     sigusr1.add((lambda x: roxbury.toggle()))
