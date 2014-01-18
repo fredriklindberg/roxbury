@@ -133,10 +133,10 @@ def main(fd, args):
             ready = p.poll(0.5)
             try:
                 if len(ready) > 0:
-                    (fd, event) = ready[0]
-                    value = os.read(fd, 1)
+                    (gpio_fd, event) = ready[0]
+                    value = os.read(gpio_fd, 1)
                     roxbury.play() if int(value) == 1 else roxbury.pause()
-                    os.lseek(fd, 0, os.SEEK_SET)
+                    os.lseek(gpio_fd, 0, os.SEEK_SET)
             except:
                 ''
         else:
