@@ -60,7 +60,7 @@ class Schedule(object):
         self._at = {}
         self._at["min"] = self._parse(self._cron["min"], 0, 59)
         self._at["hour"] = self._parse(self._cron["hour"], 0, 23)
-        self._at["day"] = self._parse(self._cron["day"], 1, 31)
+        self._at["day"] = self._parse(self._cron["day"], 1, 7)
         self._at["month"] = self._parse(self._cron["month"], 1, 12)
 
     def _parse(self, str, min, max):
