@@ -112,6 +112,9 @@ def main(fd, args):
     sigusr1 = Signal(signal.SIGUSR1)
     sigusr1.add((lambda x: roxbury.toggle()))
 
+    sigusr2 = Signal(signal.SIGUSR2)
+    sigusr2.add((lambda x: roxbury.next()))
+
     running = [True]
     def stop(x):
         syslog.syslog("Got SIGTERM/SIGINT, shuting down player")
@@ -167,6 +170,7 @@ def watchdog():
     sigint = Signal(signal.SIGINT)
     sigint.add(stop)
     signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+    signal.signal(signal.SIGUSR2, signal.SIG_IGN)
 
     while running[0]:
         try:
