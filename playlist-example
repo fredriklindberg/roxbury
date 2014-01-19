@@ -1,0 +1,13 @@
+[DEFAULT]
+shuffle=true
+
+[normal]
+shuffle=true
+cron=* * mon-thu,sat,sun *
+foo.mp3
+bar.mp3
+
+[friday]
+shuffle=false
+cron=* * fri *
+friday.mp3

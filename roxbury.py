@@ -14,18 +14,188 @@ import signal
 import select
 import syslog
 import random
+import time
 from optparse import OptionParser
+from ConfigParser import RawConfigParser
+
+# python-magic
+import magic
 
 # Gstreamer python bindings
 import pygst
 import gst
 import gobject
 
+class Schedule(object):
+    _months = {
+        "jan" : 1, "feb" : 2,
+        "mar" : 3, "apr" : 4,
+        "may" : 5, "jun" : 6,
+        "jul" : 7, "aug" : 8,
+        "sep" : 9, "oct" : 10,
+        "nov" : 11, "dec" : 12,
+    }
+
+    _days = {
+        "mon" : 1,
+        "tue" : 2,
+        "wed" : 3,
+        "thu" : 4,
+        "fri" : 5,
+        "sat" : 6,
+        "sun" : 7,
+    }
+
+    _keys = ["min", "hour", "day", "month"]
+
+    def __init__(self, at):
+        self._cron = {}
+        for key in self._keys:
+            self._cron[key] = "*"
+
+        tmp = at.split()
+        for i in xrange(0, min(len(self._keys), len(tmp))):
+            self._cron[self._keys[i]] = tmp[i]
+
+        self._at = {}
+        self._at["min"] = self._parse(self._cron["min"], 0, 59)
+        self._at["hour"] = self._parse(self._cron["hour"], 0, 23)
+        self._at["day"] = self._parse(self._cron["day"], 1, 31)
+        self._at["month"] = self._parse(self._cron["month"], 1, 12)
+
+    def _parse(self, str, min, max):
+
+        def to_num(x):
+            key = x[0:3].lower()
+            if x.isdigit():
+                return int(key)
+            elif self._months.has_key(key):
+                return self._months[key]
+            elif self._days.has_key(key):
+                return self._days[key]
+            else:
+                return None
+
+        result = []
+        if str == '*':
+            return xrange(min, max+1)
+        else:
+            for x in str.split(','):
+                y = x.split('-')
+                if len(y) == 1:
+                    result.append(to_num(y[0]))
+                elif len(y) == 2:
+                    result = result + range(to_num(y[0]), to_num(y[1]))
+        return result
+
+    def ok(self):
+        cur = time.localtime()
+
+        if not cur.tm_mon in self._at["month"]:
+            return False
+        if not cur.tm_wday in self._at["day"]:
+            return False
+        if not cur.tm_hour in self._at["hour"]:
+            return False
+        if not cur.tm_min in self._at["min"]:
+            return False
+        return True
+
+class Playable(object):
+    def __new__(cls, path):
+        mime = magic.from_file(path, mime=True)
+        if mime == 'text/plain':
+            return Playlist(path)
+        else:
+            return Music(path)
+
+class Music(object):
+    def __init__(self, path=''):
+        self._path = path
+
+    def playable(self):
+        return os.path.exists(self._path)
+
+    def next(self):
+        return self;
+
+    def __str__(self):
+        return self._path
+
+class Playlist(object):
+    def __init__(self, path=None):
+        self._list = []
+        self._pos = 0
+        self._parent = None
+        self._schedule = None
+        self._shuffle = False
+        if path:
+            self._parse(path)
+
+    def __str__(self):
+        return self._list
+
+    def _parse(self, path):
+        cfg = RawConfigParser(allow_no_value=True)
+        cfg.optionxform = str
+        cfg.read(path)
+
+        for key in cfg.defaults():
+            value = cfg.defaults()[key]
+            if key == "shuffle" and value == "true":
+                self._shuffle = True
+
+        for section in cfg.sections():
+            pl = Playlist()
+            for (key, value) in cfg.items(section):
+                if not value:
+                    pl.add(key)
+                if key == "cron":
+                    pl.schedule(value)
+                if key == "shuffle" and value == "true":
+                    pl._shuffle = True
+
+            self.add(pl)
+
+    def schedule(self, cron):
+        self._schedule = Schedule(cron)
+
+    def add(self, obj):
+        if type(obj) is Music or type(obj) is Playlist:
+            p = obj
+        else:
+            p = Playable(obj)
+
+        self._list.append(p)
+        p._parent = self;
+
+    def playable(self):
+        if self._schedule:
+            return self._schedule.ok()
+        return True
+
+    def _advance(self):
+        self._pos = (self._pos + 1) % len(self._list)
+        if self._pos == 0 and self._parent:
+            self._parent._advance()
+
+    def next(self):
+        if self._pos == 0 and self._shuffle:
+            random.shuffle(self._list)
+
+        next = self._list[self._pos]
+        if next.playable():
+            if type(next) is Music:
+                self._advance()
+            return next.next()
+        else:
+            self._advance()
+            return self.next()
+
 class Roxbury(object):
-    def __init__(self, files, rand=False):
-        self._files = files
-        self._pos = -1
-        self._rand = rand
+    def __init__(self, playlist):
+        self._playlist = playlist
+        self._file = None
         self.playing = False
         self._pl = gst.element_factory_make("playbin2", "player")
         self.next()
@@ -49,20 +219,19 @@ class Roxbury(object):
         self.bus.poll(gst.MESSAGE_ANY, 0)
 
     def next(self):
-        self._pos = (self._pos + 1) % len(self._files)
-        if self._rand and self._pos == (len(self._files) - 1):
-            self.shuffle()
-        file = self._files[self._pos]
+        self._file = str(self._playlist.next())
+        was_playing = self.playing
+        if was_playing:
+            self.stop()
         self._pl.set_property('uri',
-            'file://' + os.path.abspath(self._files[self._pos]))
-
-    def shuffle(self):
-        random.shuffle(self._files)
+            'file://' + os.path.abspath(self._file))
+        if was_playing:
+            self.play()
 
     def play(self):
         self.playing = True
         self._pl.set_state(gst.STATE_PLAYING)
-        syslog.syslog("Playing {0}".format(self._files[self._pos]))
+        syslog.syslog("Playing {0}".format(self._file))
 
     def stop(self):
         self.playing = False
@@ -90,16 +259,20 @@ class Signal(object):
             cb(arg)
 
 def main(fd, args):
-    parser = OptionParser(usage="%prog [options] file1.mp3 [file2.mp3]")
+    parser = OptionParser(usage="%prog [options] file1 [file2]")
     parser.add_option("-p", "--poll", dest="gpio", default=None,
                   help="GPIO poll")
     (opts, files) = parser.parse_args()
 
     if len(files) < 1:
-        print "You need to specify at least one music file"
+        print "You need to specify at least one music file or playlist"
         return 0
 
     random.seed()
+
+    playlist = Playlist()
+    for file in files:
+        playlist.add(file)
 
     p = None
     if opts.gpio:
@@ -107,7 +280,7 @@ def main(fd, args):
         file = open(opts.gpio, 'r')
         p.register(file, select.POLLPRI | select.POLLERR)
 
-    roxbury = Roxbury(files, True)
+    roxbury = Roxbury(playlist)
 
     sigusr1 = Signal(signal.SIGUSR1)
     sigusr1.add((lambda x: roxbury.toggle()))
