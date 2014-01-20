@@ -93,7 +93,7 @@ class Schedule(object):
 
         if not cur.tm_mon in self._at["month"]:
             return False
-        if not cur.tm_wday in self._at["day"]:
+        if not (cur.tm_wday + 1) in self._at["day"]:
             return False
         if not cur.tm_hour in self._at["hour"]:
             return False
