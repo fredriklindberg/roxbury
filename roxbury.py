@@ -85,7 +85,7 @@ class Schedule(object):
                 if len(y) == 1:
                     result.append(to_num(y[0]))
                 elif len(y) == 2:
-                    result = result + range(to_num(y[0]), to_num(y[1]))
+                    result = result + range(to_num(y[0]), to_num(y[1])+1)
         return result
 
     def ok(self):
