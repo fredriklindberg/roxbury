@@ -290,7 +290,7 @@ def main(fd, args):
 
     running = [True]
     def stop(x):
-        syslog.syslog("Got SIGTERM/SIGINT, shuting down player")
+        syslog.syslog("Got SIGTERM/SIGINT, shutting down player")
         running[0] = False
 
     sigterm = Signal(signal.SIGTERM)
@@ -335,7 +335,7 @@ def watchdog():
     running = [True]
     restart = False
     def stop(x):
-        syslog.syslog("Got SIGTERM/SIGINT, shuting down watchdog")
+        syslog.syslog("Got SIGTERM/SIGINT, shutting down watchdog")
         running[0] = False
 
     sigterm = Signal(signal.SIGTERM)
