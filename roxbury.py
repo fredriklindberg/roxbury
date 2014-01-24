@@ -335,7 +335,8 @@ def watchdog():
     running = [True]
     restart = False
     def stop(x):
-        syslog.syslog("Got SIGTERM/SIGINT, shutting down watchdog")
+        syslog.syslog("Got SIGTERM/SIGINT, shutting down all processes")
+        os.kill(pid, signal.SIGTERM)
         running[0] = False
 
     sigterm = Signal(signal.SIGTERM)
