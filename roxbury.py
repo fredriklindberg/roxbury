@@ -115,12 +115,16 @@ class Playable(object):
 class Music(object):
     def __init__(self, path=''):
         self._path = path
+        self._parent = None
 
     def playable(self):
         return os.path.exists(self._path)
 
     def next(self):
         return self;
+
+    def playlist(self):
+        return self._parent
 
     def __str__(self):
         return self._path
@@ -222,16 +226,19 @@ class Roxbury(object):
         self.bus.poll(gst.MESSAGE_ANY, 0)
 
     def next(self):
-        self._file = str(self._playlist.next())
+        self._file = self._playlist.next()
         was_playing = self.playing
         if was_playing:
             self.stop()
         self._pl.set_property('uri',
-            'file://' + os.path.abspath(self._file))
+            'file://' + os.path.abspath(str(self._file)))
         if was_playing:
             self.play()
 
     def play(self):
+        if not self._file.playlist().playable():
+            self.stop()
+            self.next()
         self.playing = True
         self._pl.set_state(gst.STATE_PLAYING)
         syslog.syslog("Playing {0}".format(self._file))
