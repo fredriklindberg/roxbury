@@ -46,7 +46,7 @@ class Schedule(object):
         "sun" : 7,
     }
 
-    _keys = ["min", "hour", "day", "month"]
+    _keys = ["min", "hour", "wday", "mday", "month"]
 
     def __init__(self, at):
         self._cron = {}
@@ -60,7 +60,8 @@ class Schedule(object):
         self._at = {}
         self._at["min"] = self._parse(self._cron["min"], 0, 59)
         self._at["hour"] = self._parse(self._cron["hour"], 0, 23)
-        self._at["day"] = self._parse(self._cron["day"], 1, 7)
+        self._at["wday"] = self._parse(self._cron["wday"], 1, 7)
+        self._at["mday"] = self._parse(self._cron["mday"], 1, 31)
         self._at["month"] = self._parse(self._cron["month"], 1, 12)
 
     def _parse(self, str, min, max):
@@ -93,7 +94,9 @@ class Schedule(object):
 
         if not cur.tm_mon in self._at["month"]:
             return False
-        if not (cur.tm_wday + 1) in self._at["day"]:
+        if not cur.tm_mday in self._at["mday"]:
+            return False
+        if not (cur.tm_wday + 1) in self._at["wday"]:
             return False
         if not cur.tm_hour in self._at["hour"]:
             return False
