@@ -214,6 +214,7 @@ class Roxbury(object):
         t = message.type
         if t == gst.MESSAGE_EOS:
             self._pl.set_state(gst.STATE_NULL)
+            self.playing = False
             self.next()
             self.play()
         elif t == gst.MESSAGE_ERROR:
