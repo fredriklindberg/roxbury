@@ -317,7 +317,7 @@ def main(fd, args):
             fd.flush()
         roxbury.poll()
         if p:
-            ready = p.poll(0.5)
+            ready = p.poll(500)
             try:
                 if len(ready) > 0:
                     (gpio_fd, event) = ready[0]
