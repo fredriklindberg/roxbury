@@ -206,7 +206,6 @@ class Roxbury(object):
         self._file = None
         self.playing = False
         self._pl = gst.element_factory_make("playbin2", "player")
-        self.next()
         self.bus = bus = self._pl.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
@@ -238,7 +237,7 @@ class Roxbury(object):
             self.play()
 
     def play(self):
-        if not all(map(lambda x: x.playable(), self._file.playlists())):
+        if not self._file or not all(map(lambda x: x.playable(), self._file.playlists())):
             self.stop()
             self.next()
         self.playing = True
