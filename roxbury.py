@@ -15,6 +15,8 @@ import select
 import syslog
 import random
 import time
+import operator
+import threading
 from optparse import OptionParser
 from ConfigParser import RawConfigParser
 
@@ -25,6 +27,131 @@ import magic
 import pygst
 import gst
 import gobject
+
+class Triggers(object):
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(Triggers, cls).__new__(cls, *args, **kwargs)
+            cls._instance._triggers = {}
+        return cls._instance
+
+    def get(self, type, args={}):
+        key = str(sorted(args.iteritems(), key=operator.itemgetter(1)))
+
+        if type not in self._triggers:
+            self._triggers[type] = {}
+
+        if key not in self._triggers[type]:
+            self._triggers[type][key] = Trigger.factory(type, args)
+
+        return self._triggers[type][key]
+
+    def stop(self):
+        for type in self._triggers:
+            for key in self._triggers[type]:
+                self._triggers[type][key].stop()
+                self._triggers[type][key] = {}
+
+class Trigger(object):
+    @staticmethod
+    def factory(type, args={}):
+        if type == "signal":
+            return Trigger_signal(args)
+        elif type == "gpio":
+            return Trigger_gpio(args)
+
+    def __init__(self):
+        self._roxbury = Roxbury()
+
+        self._monitor = threading.Thread(target=self.monitor)
+        self._monitor_running = True
+        self._monitor.start()
+
+        if getattr(self, "run", None):
+            self._tid = threading.Thread(target=self.run)
+            self._running = True
+            self._tid.start()
+        else:
+            self._tid = None
+
+    def stop(self):
+        self._roxbury.stop()
+        self._monitor_running = False
+        self._monitor.join()
+        self._running = False
+        if self._tid:
+            self._tid.join()
+
+    @property
+    def roxbury(self):
+        return self._roxbury
+    @roxbury.setter
+    def roxbury(self, value):
+        self._roxbury = value
+
+    def add_playlist(self, playlist):
+        self._roxbury.playlist.add(playlist)
+
+    def monitor(self):
+        while self._monitor_running:
+            self._roxbury.poll()
+            time.sleep(0.1)
+
+class Trigger_signal(Trigger):
+
+    _signals = {
+        'sigusr1' : signal.SIGUSR1,
+        'sigusr2' : signal.SIGUSR2,
+    }
+
+    _keys = ['toggle', 'next']
+
+    def __init__(self, args):
+
+        for key in args:
+            if key not in self._keys:
+                continue
+            value = args[key].lower()
+            if value not in self._signals:
+                continue
+            signal = self._signals[value]
+            sig = Signal(signal)
+            sig.add(self.__getattribute__("_"+key))
+
+        super(Trigger_signal, self).__init__()
+
+    def _toggle(self, arg):
+        self._roxbury.toggle()
+
+    def _next(self, arg):
+        self._roxbury.next()
+
+class Trigger_gpio(Trigger):
+
+    def __init__(self, args):
+        path = args["path"]
+
+        file = open(path, 'r')
+        self._p = select.poll()
+        self._p.register(file, select.POLLPRI | select.POLLERR)
+
+        super(Trigger_gpio, self).__init__()
+
+    def run(self):
+        while self._running:
+            ready = self._p.poll(500)
+            try:
+                if len(ready) > 0:
+                    (fd, event) = ready[0]
+                    value = os.read(fd, 1)
+                    if int(value) == 1:
+                        self._roxbury.play()
+                    else:
+                        self._roxbury.pause()
+                    os.lseek(fd, 0, os.SEEK_SET)
+            except:
+                ''
 
 class Schedule(object):
     _months = {
@@ -147,10 +274,20 @@ class Playlist(object):
         cfg.optionxform = str
         cfg.read(path)
 
+        def parse_trigger(str):
+            val = str.split(" ")
+            args = dict(map(lambda x: (x.split("=")[0], x.split("=")[1]), val[2:]))
+            trigger = Triggers().get(val[1], args)
+            trigger.roxbury = Players().get(val[0])
+            return trigger
+
         for key in cfg.defaults():
             value = cfg.defaults()[key]
             if key == "shuffle" and value == "true":
                 self._shuffle = True
+            if key[:7] == "trigger":
+                trigger = parse_trigger(value)
+                trigger.add_playlist(self)
 
         for section in cfg.sections():
             pl = Playlist()
@@ -161,6 +298,9 @@ class Playlist(object):
                     pl.schedule(value)
                 if key == "shuffle" and value == "true":
                     pl._shuffle = True
+                if key[:7] == "trigger":
+                    trigger = parse_trigger(value)
+                    trigger.add_playlist(pl)
 
             self.add(pl)
 
@@ -202,9 +342,22 @@ class Playlist(object):
             self._advance()
             return self.next()
 
+class Players(object):
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(Players, cls).__new__(cls, *args, **kwargs)
+            cls._instance._players = {}
+        return cls._instance
+
+    def get(self, id):
+        if id not in self._players:
+            self._players[id] = Roxbury()
+        return self._players[id]
+
 class Roxbury(object):
-    def __init__(self, playlist):
-        self._playlist = playlist
+    def __init__(self, playlist=None):
+        self._playlist = playlist if playlist else Playlist()
         self._file = None
         self.playing = False
         self._pl = gst.element_factory_make("playbin2", "player")
@@ -228,6 +381,10 @@ class Roxbury(object):
     def poll(self):
         if self.bus.peek() != None:
             self.bus.poll(gst.MESSAGE_EOS | gst.MESSAGE_ERROR, 0)
+
+    @property
+    def playlist(self):
+        return self._playlist
 
     def next(self):
         self._file = self._playlist.next()
@@ -284,8 +441,6 @@ class Signal(object):
 
 def main(fd, args):
     parser = OptionParser(usage="%prog [options] file1 [file2]")
-    parser.add_option("-p", "--poll", dest="gpio", default=None,
-                  help="GPIO poll")
     (opts, files) = parser.parse_args()
 
     if len(files) < 1:
@@ -294,23 +449,10 @@ def main(fd, args):
 
     random.seed()
 
+    triggers = Triggers()
     playlist = Playlist()
     for file in files:
         playlist.add(file)
-
-    p = None
-    if opts.gpio:
-        p = select.poll()
-        file = open(opts.gpio, 'r')
-        p.register(file, select.POLLPRI | select.POLLERR)
-
-    roxbury = Roxbury(playlist)
-
-    sigusr1 = Signal(signal.SIGUSR1)
-    sigusr1.add((lambda x: roxbury.toggle()))
-
-    sigusr2 = Signal(signal.SIGUSR2)
-    sigusr2.add((lambda x: roxbury.next()))
 
     running = [True]
     def stop(x):
@@ -328,20 +470,9 @@ def main(fd, args):
         if fd:
             print >>fd, "emilio"
             fd.flush()
-        roxbury.poll()
-        if p:
-            ready = p.poll(500)
-            try:
-                if len(ready) > 0:
-                    (gpio_fd, event) = ready[0]
-                    value = os.read(gpio_fd, 1)
-                    roxbury.play() if int(value) == 1 else roxbury.pause()
-                    os.lseek(gpio_fd, 0, os.SEEK_SET)
-            except:
-                ''
-        else:
-            time.sleep(0.5)
+        time.sleep(0.5)
 
+    triggers.stop()
     return 0
 
 def watchdog():
@@ -367,8 +498,6 @@ def watchdog():
     sigterm.add(stop)
     sigint = Signal(signal.SIGINT)
     sigint.add(stop)
-    signal.signal(signal.SIGUSR1, signal.SIG_IGN)
-    signal.signal(signal.SIGUSR2, signal.SIG_IGN)
 
     while running[0]:
         try:

@@ -1,5 +1,6 @@
 [DEFAULT]
 shuffle=true
+trigger=player signal toggle=SIGUSR1 next=SIGUSR2
 
 [normal]
 shuffle=true
