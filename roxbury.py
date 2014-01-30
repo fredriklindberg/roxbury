@@ -115,7 +115,7 @@ class Playable(object):
 class Music(object):
     def __init__(self, path=''):
         self._path = path
-        self._parent = None
+        self._parents = []
 
     def playable(self):
         return os.path.exists(self._path)
@@ -123,8 +123,8 @@ class Music(object):
     def next(self):
         return self;
 
-    def playlist(self):
-        return self._parent
+    def playlists(self):
+        return self._parents
 
     def __str__(self):
         return self._path
@@ -133,7 +133,7 @@ class Playlist(object):
     def __init__(self, path=None):
         self._list = []
         self._pos = 0
-        self._parent = None
+        self._parents = []
         self._schedule = None
         self._shuffle = False
         if path:
@@ -174,7 +174,7 @@ class Playlist(object):
             p = Playable(obj)
 
         self._list.append(p)
-        p._parent = self;
+        p._parents.append(self);
 
     def playable(self):
         if self._schedule:
@@ -183,8 +183,9 @@ class Playlist(object):
 
     def _advance(self):
         self._pos = (self._pos + 1) % len(self._list)
-        if self._pos == 0 and self._parent:
-            self._parent._advance()
+        if self._pos == 0 and len(self._parents) > 0:
+            for parent in self._parents:
+                parent._advance()
 
     def next(self):
         if self._pos == 0 and self._shuffle:
@@ -237,7 +238,7 @@ class Roxbury(object):
             self.play()
 
     def play(self):
-        if not self._file.playlist().playable():
+        if not all(map(lambda x: x.playable(), self._file.playlists())):
             self.stop()
             self.next()
         self.playing = True
