@@ -60,6 +60,8 @@ class Trigger(object):
             return Trigger_signal(args)
         elif type == "gpio":
             return Trigger_gpio(args)
+        elif type == "random":
+            return Trigger_random(args)
 
     def __init__(self):
         self._roxbury = Roxbury()
@@ -68,6 +70,7 @@ class Trigger(object):
         self._monitor_running = True
         self._monitor.start()
 
+        self._runcond = threading.Condition()
         if getattr(self, "run", None):
             self._tid = threading.Thread(target=self.run)
             self._running = True
@@ -80,6 +83,9 @@ class Trigger(object):
         self._monitor_running = False
         self._monitor.join()
         self._running = False
+        self._runcond.acquire()
+        self._runcond.notifyAll()
+        self._runcond.release()
         if self._tid:
             self._tid.join()
 
@@ -152,6 +158,28 @@ class Trigger_gpio(Trigger):
                     os.lseek(fd, 0, os.SEEK_SET)
             except:
                 ''
+
+class Trigger_random(Trigger):
+
+    _delay = 1.0
+    def __init__(self, args):
+        if "delay" in args:
+            self._delay = float(args["delay"])
+
+        prob = args["dice"].split("/")
+        self._dice = int(prob[1])
+        self._eyes = int(prob[0])
+
+        super(Trigger_random, self).__init__()
+
+    def run(self):
+        while self._running:
+            roll = random.randint(1, self._dice)
+            if roll <= self._eyes and not self._roxbury.playing:
+                self._roxbury.continuous = False
+                self._roxbury.play()
+            self._runcond.acquire()
+            self._runcond.wait(self._delay)
 
 class Schedule(object):
     _months = {
@@ -359,6 +387,7 @@ class Roxbury(object):
     def __init__(self, playlist=None):
         self._playlist = playlist if playlist else Playlist()
         self._file = None
+        self._continuous = True
         self.playing = False
         self._pl = gst.element_factory_make("playbin2", "player")
         self.bus = bus = self._pl.get_bus()
@@ -371,7 +400,8 @@ class Roxbury(object):
             self._pl.set_state(gst.STATE_NULL)
             self.playing = False
             self.next()
-            self.play()
+            if self._continuous:
+                self.play()
         elif t == gst.MESSAGE_ERROR:
             err, debug = message.parse_error()
             syslog.syslog(syslog.LOG_ERR, "{0}".format(err))
@@ -381,6 +411,13 @@ class Roxbury(object):
     def poll(self):
         if self.bus.peek() != None:
             self.bus.poll(gst.MESSAGE_EOS | gst.MESSAGE_ERROR, 0)
+
+    @property
+    def continuous(self):
+        return self._continuous
+    @continuous.setter
+    def continuous(self, value):
+        self._continuous = value
 
     @property
     def playlist(self):
