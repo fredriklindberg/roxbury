@@ -140,7 +140,7 @@ class Playlist(object):
             self._parse(path)
 
     def __str__(self):
-        return self._list
+        return str(self._list)
 
     def _parse(self, path):
         cfg = RawConfigParser(allow_no_value=True)
