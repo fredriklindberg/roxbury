@@ -12,3 +12,8 @@ bar.mp3
 shuffle=false
 cron=* * fri * *
 friday.mp3
+
+[random]
+trigger=randomplayer delay=1 dice=1/6
+cron=* * * * *
+random.mp3
