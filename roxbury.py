@@ -258,9 +258,17 @@ class Roxbury(object):
         self.play() if not self.playing else self.pause()
 
 class Signal(object):
+    _instances = {}
+    def __new__(cls, *args, **kwargs):
+        signo = args[0]
+        if signo not in cls._instances:
+            cls._instances[signo] = super(Signal, cls).__new__(cls, *args, **kwargs)
+            cls._instances[signo]._list = []
+            signal.signal(signo, cls._instances[signo].handler)
+        return cls._instances[signo]
+
     def __init__(self, signo):
-        self._list = []
-        signal.signal(signo, self.handler)
+        ''
 
     def add(self, callback, argument=None):
         self._list.append((callback, argument))
