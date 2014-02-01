@@ -225,7 +225,7 @@ class Roxbury(object):
 
     def poll(self):
         if self.bus.peek() != None:
-            self.bus.poll(gst.MESSAGE_ANY, 0)
+            self.bus.poll(gst.MESSAGE_EOS | gst.MESSAGE_ERROR, 0)
 
     def next(self):
         self._file = self._playlist.next()
