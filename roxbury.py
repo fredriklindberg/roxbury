@@ -188,6 +188,8 @@ class Playlist(object):
                 parent._advance()
 
     def next(self):
+        if len(self._list) == 0:
+            return None
         if self._pos == 0 and self._shuffle:
             random.shuffle(self._list)
 
@@ -241,6 +243,8 @@ class Roxbury(object):
         if not self._file or not all(map(lambda x: x.playable(), self._file.playlists())):
             self.stop()
             self.next()
+            if not self._file:
+                return
         self.playing = True
         self._pl.set_state(gst.STATE_PLAYING)
         syslog.syslog("Playing {0}".format(self._file))
