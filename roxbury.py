@@ -136,17 +136,15 @@ class Trigger_signal(Trigger):
 class Trigger_gpio(Trigger):
 
     def __init__(self, args):
-        path = args["path"]
-
-        file = open(path, 'r')
-        self._p = select.poll()
-        self._p.register(file, select.POLLPRI | select.POLLERR)
-
+        self._path = args["path"]
         super(Trigger_gpio, self).__init__()
 
     def run(self):
+        file = open(self._path, 'r')
+        p = select.poll()
+        p.register(file, select.POLLPRI | select.POLLERR)
         while self._running:
-            ready = self._p.poll(500)
+            ready = p.poll(500)
             try:
                 if len(ready) > 0:
                     (fd, event) = ready[0]
