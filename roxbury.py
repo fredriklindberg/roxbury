@@ -17,6 +17,7 @@ import random
 import time
 import operator
 import threading
+from multiprocessing import Process, Pipe
 from optparse import OptionParser
 from ConfigParser import RawConfigParser
 
@@ -64,12 +65,10 @@ class Trigger(object):
             return Trigger_random(args)
 
     def __init__(self):
-        self._roxbury = Roxbury()
+        self._roxbury = None
+        self._running = False
 
-        self._monitor = threading.Thread(target=self.monitor)
-        self._monitor_running = True
-        self._monitor.start()
-
+    def start(self):
         self._runcond = threading.Condition()
         if getattr(self, "run", None):
             self._tid = threading.Thread(target=self.run)
@@ -79,9 +78,9 @@ class Trigger(object):
             self._tid = None
 
     def stop(self):
-        self._roxbury.stop()
-        self._monitor_running = False
-        self._monitor.join()
+        self._roxbury.quit()
+        if not self._running:
+            return
         self._running = False
         self._runcond.acquire()
         self._runcond.notifyAll()
@@ -95,14 +94,11 @@ class Trigger(object):
     @roxbury.setter
     def roxbury(self, value):
         self._roxbury = value
+        if value != None:
+            self.start()
 
     def add_playlist(self, playlist):
         self._roxbury.playlist.add(playlist)
-
-    def monitor(self):
-        while self._monitor_running:
-            self._roxbury.poll()
-            time.sleep(0.1)
 
 class Trigger_signal(Trigger):
 
@@ -381,34 +377,108 @@ class Players(object):
             self._players[id] = Roxbury()
         return self._players[id]
 
+class Gstreamer(object):
+    def __init__(self, fd):
+        self._fd = fd
+        self.start()
+
+    def start(self):
+        self._p = Process(target=self._run, args=(self._fd,))
+        self._p.start()
+
+    def stop(self):
+        if self._p:
+            try:
+                os.kill(self._p.pid, signal.SIGKILL)
+            except:
+                ''
+            self._p.join()
+        self._p = None
+
+    def restart(self):
+        self.stop()
+        self.start()
+
+    def _run(self, fd):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        self._pl = gst.element_factory_make("playbin2", "player")
+        bus = self._pl.get_bus()
+        bus.add_signal_watch()
+
+        def on_message(bus, message):
+            t = message.type
+            if t == gst.MESSAGE_EOS:
+                self._pl.set_state(gst.STATE_NULL)
+                fd.send({'state' : 'eos'})
+            elif t == gst.MESSAGE_ERROR:
+                err, debug = message.parse_error()
+                syslog.syslog(syslog.LOG_ERR, "{0}".format(err))
+                syslog.syslog(syslog.LOG_DEBUG, "{0}".format(debug))
+                fd.send({'state' : 'error'})
+
+        bus.connect("message", on_message)
+        while True:
+            bus.poll(gst.MESSAGE_EOS | gst.MESSAGE_ERROR, 0)
+            rr,rw,re = select.select([fd], [], [], 0.5)
+            if len(rr) > 0:
+                x = rr[0].recv()
+                args = x["args"] if "args" in x else []
+                self.__getattribute__("cmd_"+x["cmd"])(args)
+            fd.send({'state' : 'emilio'})
+
+    def cmd_set(self, args):
+        self._pl.set_property('uri',
+            'file://' + os.path.abspath(str(args[0])))
+
+    def cmd_stop(self, args):
+        self._pl.set_state(gst.STATE_NULL)
+        self._fd.send({'state' : 'stop'})
+
+    def cmd_play(self, args):
+        self._pl.set_state(gst.STATE_PLAYING)
+        self._fd.send({'state' : 'play'})
+
+    def cmd_pause(self, args):
+        self._pl.set_state(gst.STATE_PAUSED)
+        self._fd.send({'state' : 'pause'})
+
 class Roxbury(object):
     def __init__(self, playlist=None):
         self._playlist = playlist if playlist else Playlist()
         self._file = None
-        self._continuous = True
         self.playing = False
-        self._pl = gst.element_factory_make("playbin2", "player")
-        self.bus = bus = self._pl.get_bus()
-        bus.add_signal_watch()
-        bus.connect("message", self.on_message)
+        self._continuous = True
+        self._fd, fd = Pipe()
+        self._gs = Gstreamer(fd)
+        self._tid = threading.Thread(target=self._run)
+        self._running = True
+        self._tid.start()
 
-    def on_message(self, bus, message):
-        t = message.type
-        if t == gst.MESSAGE_EOS:
-            self._pl.set_state(gst.STATE_NULL)
-            self.playing = False
-            self.next()
-            if self._continuous:
-                self.play()
-        elif t == gst.MESSAGE_ERROR:
-            err, debug = message.parse_error()
-            syslog.syslog(syslog.LOG_ERR, "{0}".format(err))
-            syslog.syslog(syslog.LOG_DEBUG, "{0}".format(debug))
-            self.stop()
+    def _run(self):
+        while self._running:
+            rr,rw,re = select.select([self._fd], [], [], 30)
+            if len(rr) == 0:
+                syslog.syslog("No ass-grabbing for 30 secs, resetting")
+                self._gs.restart()
+            x = self._fd.recv()
+            if x["state"] == "eos" or x["state"] == "error":
+                if not self._continuous:
+                    self.stop()
+                self.next()
 
-    def poll(self):
-        if self.bus.peek() != None:
-            self.bus.poll(gst.MESSAGE_EOS | gst.MESSAGE_ERROR, 0)
+    def quit(self):
+        if not self._running:
+            return
+        self._running = False
+        self._fd.send({'cmd' : 'stop'})
+        self.stop()
+        self._tid.join()
+        self._gs.stop()
+
+    @property
+    def playlist(self):
+        return self._playlist
 
     @property
     def continuous(self):
@@ -417,17 +487,12 @@ class Roxbury(object):
     def continuous(self, value):
         self._continuous = value
 
-    @property
-    def playlist(self):
-        return self._playlist
-
     def next(self):
         self._file = self._playlist.next()
         was_playing = self.playing
         if was_playing:
             self.stop()
-        self._pl.set_property('uri',
-            'file://' + os.path.abspath(str(self._file)))
+        self._fd.send({'cmd' : 'set', 'args': [ self._file ]})
         if was_playing:
             self.play()
 
@@ -437,19 +502,23 @@ class Roxbury(object):
             self.next()
             if not self._file:
                 return
+        self._fd.send({'cmd' : 'play'})
         self.playing = True
-        self._pl.set_state(gst.STATE_PLAYING)
         syslog.syslog("Playing {0}".format(self._file))
 
     def stop(self):
+        if not self.playing:
+            return
+        self._fd.send({'cmd' : 'stop'})
         self.playing = False
-        self._pl.set_state(gst.STATE_NULL)
-        syslog.syslog("Playpack stopped")
+        syslog.syslog("Playback done")
 
     def pause(self):
+        if not self.playing:
+            return
+        self._fd.send({'cmd' : 'pause'})
         self.playing = False
-        self._pl.set_state(gst.STATE_PAUSED)
-        syslog.syslog("Playback paused")
+        syslog.syslog("Playback of {0} paused".format(self._file))
 
     def toggle(self):
         self.play() if not self.playing else self.pause()
@@ -474,7 +543,7 @@ class Signal(object):
         for (cb, arg) in self._list:
             cb(arg)
 
-def main(fd, args):
+def main(args):
     parser = OptionParser(usage="%prog [options] file1 [file2]")
     (opts, files) = parser.parse_args()
 
@@ -502,62 +571,10 @@ def main(fd, args):
     syslog.syslog("Ready to dance")
 
     while running[0]:
-        if fd:
-            print >>fd, "emilio"
-            fd.flush()
         time.sleep(0.5)
 
     triggers.stop()
     return 0
 
-def watchdog():
-    r,w = os.pipe()
-    r = os.fdopen(r, 'r', 0)
-    w = os.fdopen(w, 'w', 0)
-
-    pid = os.fork()
-    if pid < 0:
-        print "Fork failed"
-        sys.exit(-1)
-    elif pid == 0:
-        sys.exit(main(w, sys.argv))
-
-    running = [True]
-    restart = False
-    def stop(x):
-        syslog.syslog("Got SIGTERM/SIGINT, shutting down all processes")
-        os.kill(pid, signal.SIGTERM)
-        running[0] = False
-
-    sigterm = Signal(signal.SIGTERM)
-    sigterm.add(stop)
-    sigint = Signal(signal.SIGINT)
-    sigint.add(stop)
-
-    while running[0]:
-        try:
-            rr,rw,re = select.select([r], [], [], 2.5)
-            if len(rr) > 0:
-                r.readline()
-            elif len(rr) == 0:
-                (wpid, ret) = os.waitpid(pid, os.WNOHANG)
-                if wpid == 0 or (wpid != 0 and ret != 0):
-                    os.kill(pid, signal.SIGKILL)
-                    restart = True
-                    syslog.syslog("Not enough ass-grabbing, resetting")
-                running[0] = False
-                break
-        except:
-            ''
-
-    r.close()
-    try:
-        os.waitpid(pid, os.WNOHANG)
-    except:
-        ''
-    return restart
-
 if __name__ == '__main__':
-    restart = True
-    while restart:
-        restart = watchdog()
+    sys.exit(main(sys.argv))
