@@ -497,6 +497,8 @@ class Roxbury(object):
             self.play()
 
     def play(self):
+        if self.playing:
+            return
         if not self._file or not all(map(lambda x: x.playable(), self._file.playlists())):
             self.stop()
             self.next()
