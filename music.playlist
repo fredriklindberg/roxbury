@@ -1,0 +1,41 @@
+[DEFAULT]
+shuffle=true
+trigger0=musicplayer signal toggle=SIGUSR1 next=SIGUSR2
+trigger1=musicplayer gpio path=/sys/class/gpio/gpio17/value
+
+[normal]
+shuffle=true
+cron=* * tue-thu,sat,sun * *
+/home/roxbury/music/portal/glados/GLaDOS_02_part1_entry-1.mp3
+/home/roxbury/music/Gunther_-_Ding_Dong_Song.mp3
+/home/roxbury/music/pop_opp_i_topp.mp3
+/home/roxbury/music/sallskapsresan-tema.mp3
+/home/roxbury/music/inatt-inatt.mp3
+/home/roxbury/music/bailando.mp3
+/home/roxbury/music/follow_you_home.mp3
+/home/roxbury/music/fageldansen.mp3
+/home/roxbury/music/drangarna-vill_du_bli_min_fru.mp3
+/home/roxbury/music/stefan_ruden-sofia_dansar_gogo.mp3
+/home/roxbury/music/hall_hoger.mp3
+/home/roxbury/music/Rednex-Cotton-Eye-Joe.mp3
+/home/roxbury/music/el_bimbo.mp3
+/home/roxbury/music/lyckliga_gatan.mp3
+/home/roxbury/music/buffalo.mp3
+
+[monday-fm]
+cron=* 00-11 mon * *
+/home/roxbury/music/mandag_mandag.mp3
+
+[monday-em]
+cron=* 12-24 mon * *
+/home/roxbury/music/The_Bangles-Manic_Monday.mp3
+
+[friday]
+shuffle=false
+cron=* * fri * *
+/home/roxbury/music/friday.mp3
+/home/roxbury/music/aqua-freaky-friday.mp3
+
+[easter]
+cron=* * * 14-21 apr
+/home/roxbury/music/techno-chicken.mp3
